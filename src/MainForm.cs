@@ -15,12 +15,20 @@ public class MainForm : Form
     private readonly NotifyIcon _trayIcon;
     private readonly ContextMenuStrip _contextMenu;
     private readonly ToolStripMenuItem _statusItem;
+    private readonly ToolStripMenuItem _runAtStartupItem;
+    private readonly ToolStripMenuItem _autoUpdateItem;
     private readonly ShutdownBlocker _blocker;
+    private readonly AutoUpdater _autoUpdater;
+    private readonly AppConfig _appConfig;
     private readonly List<ShutdownRecord> _attemptHistory = new();
     private bool _allowExit;
+    private bool _isUpdateCheckInProgress;
 
     public MainForm()
     {
+        _appConfig = AppConfig.Load();
+        _autoUpdater = new AutoUpdater();
+
         // Initialize shutdown blocker first
         _blocker = new ShutdownBlocker();
         _blocker.ShutdownAttempted += OnShutdownAttempted;
@@ -44,16 +52,33 @@ public class MainForm : Form
             Enabled = false
         };
 
+        _runAtStartupItem = new ToolStripMenuItem("Run at Windows startup", null, OnToggleRunAtStartup)
+        {
+            CheckOnClick = true
+        };
+
+        _autoUpdateItem = new ToolStripMenuItem("Auto check updates", null, OnToggleAutoUpdate)
+        {
+            CheckOnClick = true,
+            Checked = _appConfig.AutoUpdateEnabled
+        };
+
+        var checkUpdatesItem = new ToolStripMenuItem("Check for Updates", null, OnCheckForUpdates);
         var historyItem = new ToolStripMenuItem("Show Attempts", null, OnShowHistory);
         var logItem = new ToolStripMenuItem("Open Log Folder", null, OnOpenLogFolder);
         var exitItem = new ToolStripMenuItem("Exit", null, OnExit);
 
         _contextMenu.Items.Add(_statusItem);
+        _contextMenu.Items.Add(_runAtStartupItem);
+        _contextMenu.Items.Add(_autoUpdateItem);
+        _contextMenu.Items.Add(checkUpdatesItem);
         _contextMenu.Items.Add(new ToolStripSeparator());
         _contextMenu.Items.Add(historyItem);
         _contextMenu.Items.Add(logItem);
         _contextMenu.Items.Add(new ToolStripSeparator());
         _contextMenu.Items.Add(exitItem);
+
+        ApplyStartupSetting();
 
         // Setup tray icon
         _trayIcon = new NotifyIcon
@@ -94,6 +119,11 @@ public class MainForm : Form
         base.OnHandleCreated(e);
         _blocker.AttachTo(this);
         ShutdownBlocker.Log($"MainForm handle created: 0x{Handle:X}");
+
+        if (_appConfig.AutoUpdateEnabled)
+        {
+            _ = CheckForUpdatesAsync(showLatestMessage: false);
+        }
     }
 
     protected override void WndProc(ref Message m)
@@ -208,6 +238,142 @@ public class MainForm : Form
             _trayIcon.Visible = false;
             Close();
         }
+    }
+
+    private void OnToggleRunAtStartup(object? sender, EventArgs e)
+    {
+        bool enabled = _runAtStartupItem.Checked;
+
+        try
+        {
+            StartupManager.SetEnabled(enabled);
+            _appConfig.RunAtStartupEnabled = enabled;
+            _appConfig.Save();
+            ShutdownBlocker.Log($"Startup setting changed: Enabled={enabled}");
+        }
+        catch (Exception ex)
+        {
+            _runAtStartupItem.Checked = !enabled;
+            ShutdownBlocker.Log($"Failed to change startup setting: {ex.Message}");
+            MessageBox.Show("Failed to update startup setting.", "PowerGuard",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void OnToggleAutoUpdate(object? sender, EventArgs e)
+    {
+        _appConfig.AutoUpdateEnabled = _autoUpdateItem.Checked;
+        _appConfig.Save();
+        ShutdownBlocker.Log($"Auto update setting changed: Enabled={_appConfig.AutoUpdateEnabled}");
+    }
+
+    private async void OnCheckForUpdates(object? sender, EventArgs e)
+    {
+        await CheckForUpdatesAsync(showLatestMessage: true);
+    }
+
+    private void ApplyStartupSetting()
+    {
+        bool enabled = _appConfig.RunAtStartupEnabled;
+
+        try
+        {
+            StartupManager.SetEnabled(enabled);
+            _runAtStartupItem.Checked = StartupManager.IsEnabled();
+            _appConfig.RunAtStartupEnabled = _runAtStartupItem.Checked;
+            _appConfig.Save();
+        }
+        catch (Exception ex)
+        {
+            _runAtStartupItem.Checked = false;
+            _appConfig.RunAtStartupEnabled = false;
+            _appConfig.Save();
+            ShutdownBlocker.Log($"Startup setting apply failed: {ex.Message}");
+        }
+    }
+
+    private async Task CheckForUpdatesAsync(bool showLatestMessage)
+    {
+        if (_isUpdateCheckInProgress)
+            return;
+
+        _isUpdateCheckInProgress = true;
+
+        try
+        {
+            Version currentVersion = GetCurrentVersion();
+            UpdateCheckResult result = await _autoUpdater.CheckForUpdateAsync(currentVersion);
+
+            if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+            {
+                ShutdownBlocker.Log(result.ErrorMessage);
+                if (showLatestMessage)
+                {
+                    MessageBox.Show(result.ErrorMessage, "Update Check",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+
+                return;
+            }
+
+            if (!result.IsUpdateAvailable)
+            {
+                if (showLatestMessage)
+                {
+                    MessageBox.Show("You already have the latest version.", "Update Check",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
+                return;
+            }
+
+            DialogResult confirm = MessageBox.Show(
+                $"A new version ({result.LatestVersion}) is available.\n\nInstall now?",
+                "PowerGuard Update",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information);
+
+            if (confirm != DialogResult.Yes)
+                return;
+
+            string installerPath = await _autoUpdater.DownloadInstallerAsync(result.DownloadUrl!);
+            ShutdownBlocker.Log($"Downloaded update installer: {installerPath}");
+
+            _allowExit = true;
+            _blocker.StopBlocking();
+            _trayIcon.Visible = false;
+
+            var startInfo = new System.Diagnostics.ProcessStartInfo("msiexec.exe", $"/i \"{installerPath}\"")
+            {
+                UseShellExecute = true
+            };
+
+            System.Diagnostics.Process.Start(startInfo);
+            Close();
+        }
+        catch (Exception ex)
+        {
+            ShutdownBlocker.Log($"Update flow failed: {ex.Message}");
+            if (showLatestMessage)
+            {
+                MessageBox.Show("Update failed. Please try again later.", "PowerGuard Update",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        finally
+        {
+            _isUpdateCheckInProgress = false;
+        }
+    }
+
+    private static Version GetCurrentVersion()
+    {
+        Version? assemblyVersion = typeof(MainForm).Assembly.GetName().Version;
+        if (assemblyVersion is null)
+            return new Version(0, 0, 0);
+
+        int build = Math.Max(0, assemblyVersion.Build);
+        return new Version(assemblyVersion.Major, assemblyVersion.Minor, build);
     }
 
     private static Icon CreateBlockIcon()

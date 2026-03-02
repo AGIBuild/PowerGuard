@@ -83,6 +83,7 @@ jobs:
             --self-contained true `
             /p:PublishSingleFile=true `
             /p:PublishTrimmed=false `
+            /p:Version="${{ steps.version.outputs.product_version }}" `
             -o artifacts/publish
 
       - name: Install WiX Toolset
