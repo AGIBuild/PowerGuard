@@ -1,0 +1,77 @@
+name: create-tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example: 0.1.2 or v0.1.2)"
+        required: true
+        type: string
+      ref:
+        description: "Git ref to tag (branch or commit SHA)"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-and-push-tag:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Normalize and validate tag
+        id: tag
+        shell: bash
+        run: |
+          INPUT_VERSION="${{ inputs.version }}"
+          INPUT_VERSION="${INPUT_VERSION// /}"
+
+          if [[ -z "$INPUT_VERSION" ]]; then
+            echo "Version input cannot be empty."
+            exit 1
+          fi
+
+          if [[ "$INPUT_VERSION" == v* ]]; then
+            TAG="$INPUT_VERSION"
+          else
+            TAG="v$INPUT_VERSION"
+          fi
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version format: $TAG"
+            echo "Use vMAJOR.MINOR.PATCH (for example: v1.2.3)."
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure tag does not already exist
+        shell: bash
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag already exists locally: $TAG"
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag already exists on remote: $TAG"
+            exit 1
+          fi
+
+      - name: Create and push tag
+        shell: bash
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Created and pushed tag: $TAG"
