@@ -1,0 +1,43 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="PowerGuard"
+           Manufacturer="AGIBuild"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="{E4CB575A-EA6F-4A86-A6A7-DF7D6F2267C4}"
+           Language="1033"
+           InstallerVersion="500"
+           Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="PowerGuard">
+        <Component Id="cmpMainExe" Guid="{4C41A164-32B5-4835-B9D7-44C8B43DCE4F}">
+          <File Id="filMainExe" Source="$(var.PublishDir)\PowerGuard.exe" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="PowerGuard">
+        <Component Id="cmpShortcut" Guid="{A8309D36-89AA-4EBB-8C4C-83814A89C8A8}">
+          <Shortcut Id="startMenuShortcut"
+                    Name="PowerGuard"
+                    Target="[INSTALLFOLDER]PowerGuard.exe"
+                    WorkingDirectory="INSTALLFOLDER" />
+          <RemoveFolder Id="removeProgramMenuDir" On="uninstall" />
+          <RegistryValue Root="HKLM"
+                         Key="Software\AGIBuild\PowerGuard"
+                         Name="Installed"
+                         Type="integer"
+                         Value="1"
+                         KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="PowerGuard" Level="1">
+      <ComponentRef Id="cmpMainExe" />
+      <ComponentRef Id="cmpShortcut" />
+    </Feature>
+  </Package>
+</Wix>
