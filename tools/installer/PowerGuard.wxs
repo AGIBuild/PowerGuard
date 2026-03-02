@@ -1,6 +1,6 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="PowerGuard"
-           Manufacturer="AGIBuild"
+           Manufacturer="agibuild"
            Version="$(var.ProductVersion)"
            UpgradeCode="{E4CB575A-EA6F-4A86-A6A7-DF7D6F2267C4}"
            Language="1033"
