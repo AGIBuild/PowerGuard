@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (for example: 0.1.2 or v0.1.2)"
-        required: true
+        description: "Optional release version (for example: 0.1.2 or v0.1.2). Leave empty to auto-increment patch version."
+        required: false
+        default: ""
         type: string
       ref:
         description: "Git ref to tag (branch or commit SHA)"
@@ -26,8 +27,13 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
+          fetch-tags: true
 
-      - name: Normalize and validate tag
+      - name: Fetch all tags
+        shell: bash
+        run: git fetch --tags --force origin
+
+      - name: Resolve and validate tag
         id: tag
         shell: bash
         run: |
@@ -35,14 +41,22 @@ jobs:
           INPUT_VERSION="${INPUT_VERSION// /}"
 
           if [[ -z "$INPUT_VERSION" ]]; then
-            echo "Version input cannot be empty."
-            exit 1
-          fi
+            LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)
 
-          if [[ "$INPUT_VERSION" == v* ]]; then
-            TAG="$INPUT_VERSION"
+            if [[ -z "$LATEST_TAG" ]]; then
+              TAG="v0.1.0"
+            else
+              VERSION_PART="${LATEST_TAG#v}"
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_PART"
+              NEXT_PATCH=$((PATCH + 1))
+              TAG="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
+            fi
           else
-            TAG="v$INPUT_VERSION"
+            if [[ "$INPUT_VERSION" == v* ]]; then
+              TAG="$INPUT_VERSION"
+            else
+              TAG="v$INPUT_VERSION"
+            fi
           fi
 
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
