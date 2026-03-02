@@ -1,0 +1,40 @@
+# Build artifacts
+[Bb]in/
+[Oo]bj/
+**/[Bb]in/
+**/[Oo]bj/
+
+# User-specific files
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+
+# IDE folders
+.vs/
+.vscode/
+
+# NuGet packages and cache
+packages/
+*.nupkg
+*.snupkg
+
+# Generated files
+*.cache
+*.log
+*.tlog
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Test and coverage artifacts
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Publish output
+publish/
+artifacts/
