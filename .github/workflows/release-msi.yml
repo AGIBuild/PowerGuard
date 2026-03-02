@@ -30,13 +30,12 @@ jobs:
       - name: Build with warnings as errors
         run: dotnet build src/PowerGuard.csproj -c Release --no-restore -warnaserror
 
-      - name: Run unit tests when present
+      - name: Require and run unit tests
         shell: pwsh
         run: |
           $testProjects = Get-ChildItem -Path . -Recurse -Filter "*Tests.csproj" | Select-Object -ExpandProperty FullName
           if (-not $testProjects) {
-            Write-Host "No *Tests.csproj found. Skipping unit tests."
-            exit 0
+            throw "No *Tests.csproj found. Automated tests are required before release packaging."
           }
 
           foreach ($project in $testProjects) {
