@@ -9,8 +9,43 @@ permissions:
   contents: write
 
 jobs:
+  quality-gate:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore src/PowerGuard.sln
+
+      - name: Verify formatting
+        run: dotnet format src/PowerGuard.sln --verify-no-changes --no-restore
+
+      - name: Build with warnings as errors
+        run: dotnet build src/PowerGuard.csproj -c Release --no-restore -warnaserror
+
+      - name: Run unit tests when present
+        shell: pwsh
+        run: |
+          $testProjects = Get-ChildItem -Path . -Recurse -Filter "*Tests.csproj" | Select-Object -ExpandProperty FullName
+          if (-not $testProjects) {
+            Write-Host "No *Tests.csproj found. Skipping unit tests."
+            exit 0
+          }
+
+          foreach ($project in $testProjects) {
+            dotnet test $project -c Release --no-build --verbosity normal
+          }
+
   build-and-release:
     runs-on: windows-latest
+    needs: quality-gate
 
     steps:
       - name: Checkout
@@ -39,9 +74,6 @@ jobs:
 
       - name: Restore
         run: dotnet restore src/PowerGuard.csproj
-
-      - name: Build
-        run: dotnet build src/PowerGuard.csproj -c Release --no-restore
 
       - name: Publish single-file app
         shell: pwsh
