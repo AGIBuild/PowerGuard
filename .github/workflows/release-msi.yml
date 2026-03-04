@@ -75,15 +75,18 @@ jobs:
           }
 
           $releaseVersion = $tag.TrimStart('v')
-          $productVersion = ([regex]::Match($releaseVersion, '^\d+\.\d+\.\d+')).Value
+          $appVersion = ([regex]::Match($releaseVersion, '^\d+\.\d+\.\d+')).Value
 
-          if ([string]::IsNullOrWhiteSpace($productVersion)) {
+          if ([string]::IsNullOrWhiteSpace($appVersion)) {
             throw "Tag '$tag' is invalid. Use format vMAJOR.MINOR.PATCH (for example: v1.2.3)."
           }
 
+          $assemblyVersion = "$appVersion.0"
+
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "release_version=$releaseVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "product_version=$productVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "assembly_version=$assemblyVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Restore
         run: dotnet restore src/PowerGuard.csproj
@@ -97,7 +100,10 @@ jobs:
             --self-contained true `
             /p:PublishSingleFile=true `
             /p:PublishTrimmed=false `
-            /p:Version="${{ steps.version.outputs.product_version }}" `
+            /p:Version="${{ steps.version.outputs.app_version }}" `
+            /p:FileVersion="${{ steps.version.outputs.assembly_version }}" `
+            /p:AssemblyVersion="${{ steps.version.outputs.assembly_version }}" `
+            /p:InformationalVersion="${{ steps.version.outputs.app_version }}" `
             -o artifacts/publish
 
       - name: Install WiX Toolset
@@ -113,7 +119,7 @@ jobs:
           wix build tools/installer/PowerGuard.wxs `
             -arch x64 `
             -d PublishDir="$pwd\artifacts\publish" `
-            -d ProductVersion="${{ steps.version.outputs.product_version }}" `
+            -d ProductVersion="${{ steps.version.outputs.app_version }}" `
             -o "artifacts\$msiName"
 
       - name: Publish GitHub Release

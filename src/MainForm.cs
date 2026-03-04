@@ -67,6 +67,7 @@ public class MainForm : Form
         var checkUpdatesItem = new ToolStripMenuItem("Check for Updates", null, OnCheckForUpdates);
         var historyItem = new ToolStripMenuItem("Show Attempts", null, OnShowHistory);
         var logItem = new ToolStripMenuItem("Open Log Folder", null, OnOpenLogFolder);
+        var aboutItem = new ToolStripMenuItem("About", null, OnShowAbout);
         var exitItem = new ToolStripMenuItem("Exit", null, OnExit);
 
         _contextMenu.Items.Add(_statusItem);
@@ -76,6 +77,7 @@ public class MainForm : Form
         _contextMenu.Items.Add(new ToolStripSeparator());
         _contextMenu.Items.Add(historyItem);
         _contextMenu.Items.Add(logItem);
+        _contextMenu.Items.Add(aboutItem);
         _contextMenu.Items.Add(new ToolStripSeparator());
         _contextMenu.Items.Add(exitItem);
 
@@ -224,6 +226,16 @@ public class MainForm : Form
         System.Diagnostics.Process.Start("explorer.exe", logDir);
     }
 
+    private static void OnShowAbout(object? sender, EventArgs e)
+    {
+        Version version = GetCurrentVersion();
+        MessageBox.Show(
+            $"{Application.ProductName}\nVersion: {version}",
+            "About",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
+
     private void OnExit(object? sender, EventArgs e)
     {
         var result = MessageBox.Show(
@@ -344,12 +356,7 @@ public class MainForm : Form
             _blocker.StopBlocking();
             _trayIcon.Visible = false;
 
-            var startInfo = new System.Diagnostics.ProcessStartInfo("msiexec.exe", $"/i \"{installerPath}\"")
-            {
-                UseShellExecute = true
-            };
-
-            System.Diagnostics.Process.Start(startInfo);
+            StartInstallerAndRelaunch(installerPath);
             Close();
         }
         catch (Exception ex)
@@ -367,14 +374,43 @@ public class MainForm : Form
         }
     }
 
+    private static void StartInstallerAndRelaunch(string installerPath)
+    {
+        string currentExePath = Application.ExecutablePath;
+        string escapedInstallerPath = installerPath.Replace("'", "''");
+        string escapedExePath = currentExePath.Replace("'", "''");
+
+        string script =
+            "$installer = '" + escapedInstallerPath + "'; " +
+            "$exe = '" + escapedExePath + "'; " +
+            "$p = Start-Process msiexec.exe -ArgumentList ('/i \"' + $installer + '\"') -PassThru -Wait; " +
+            "if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) { Start-Process $exe }";
+
+        var startInfo = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+        {
+            Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"{script}\"",
+            UseShellExecute = true,
+            CreateNoWindow = true
+        };
+
+        System.Diagnostics.Process.Start(startInfo);
+    }
+
     private static Version GetCurrentVersion()
     {
-        Version? assemblyVersion = typeof(MainForm).Assembly.GetName().Version;
-        if (assemblyVersion is null)
-            return new Version(0, 0, 0);
+        string? productVersion = Application.ProductVersion;
+        if (!string.IsNullOrWhiteSpace(productVersion))
+        {
+            string normalized = productVersion.Split('+')[0];
+            if (Version.TryParse(normalized, out Version? version) && version is not null)
+                return new Version(version.Major, version.Minor, Math.Max(0, version.Build));
+        }
 
-        int build = Math.Max(0, assemblyVersion.Build);
-        return new Version(assemblyVersion.Major, assemblyVersion.Minor, build);
+        Version? assemblyVersion = typeof(MainForm).Assembly.GetName().Version;
+        if (assemblyVersion is not null)
+            return new Version(assemblyVersion.Major, assemblyVersion.Minor, Math.Max(0, assemblyVersion.Build));
+
+        return new Version(0, 0, 0);
     }
 
     private static Icon CreateBlockIcon()
