@@ -31,6 +31,7 @@ public class MainForm : Form
 
         // Initialize shutdown blocker first
         _blocker = new ShutdownBlocker();
+        _blocker.AntiIdleActivationSeconds = Math.Clamp(_appConfig.AntiIdleActivationSeconds, 1200, 7200);
         _blocker.ShutdownAttempted += OnShutdownAttempted;
 
         // ===================================================================

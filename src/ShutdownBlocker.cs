@@ -148,6 +148,7 @@ public partial class ShutdownBlocker : IDisposable
     private int? _savedMaxIdleTime;             // original registry value to restore
     private int? _savedMaxDisconnectionTime;     // original registry value to restore
     private bool _registryModified;
+    private int _antiIdleActivationSeconds = 1200;
 
     private static readonly string s_logDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -162,6 +163,12 @@ public partial class ShutdownBlocker : IDisposable
     public event EventHandler<ShutdownAttemptEventArgs>? ShutdownAttempted;
 
     public bool IsBlocking => _isBlocking;
+
+    public int AntiIdleActivationSeconds
+    {
+        get => _antiIdleActivationSeconds;
+        set => _antiIdleActivationSeconds = Math.Clamp(value, 1200, 7200);
+    }
 
     public ShutdownBlocker()
     {
@@ -306,7 +313,7 @@ public partial class ShutdownBlocker : IDisposable
             _ => PerformAntiIdle(),
             null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30));
 
-        Log("Anti-idle started (30s interval, multi-method)");
+        Log($"Anti-idle started (30s interval, active after idle {AntiIdleActivationSeconds}s)");
     }
 
     private void StopAntiIdle()
@@ -316,32 +323,35 @@ public partial class ShutdownBlocker : IDisposable
     }
 
     /// <summary>
-    /// Multi-method anti-idle: uses 3 different input simulation techniques
-    /// to ensure at least one resets the RDS idle timer.
+    /// Anti-idle trigger: only simulate input after enough idle time.
+    /// Once simulated, idle timer is reset and the next trigger happens
+    /// after another full idle window.
     /// </summary>
-    private static void PerformAntiIdle()
+    private void PerformAntiIdle()
     {
         try
         {
             uint tickBefore = GetLastInputTick();
+            uint nowTick = unchecked((uint)Environment.TickCount);
+            uint idleMs = unchecked(nowTick - tickBefore);
 
-            // Method 1: keybd_event (legacy API, most reliable in RDS)
+            // Always refresh execution state, but only simulate input after sufficient idle time.
+            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+
+            uint activationMs = (uint)(AntiIdleActivationSeconds * 1000);
+            if (idleMs < activationMs)
+            {
+                Log($"AntiIdle skipped input simulation: idle={idleMs}ms, threshold={activationMs}ms");
+                return;
+            }
+
+            // Minimal keyboard nudge
             keybd_event(VK_F15, 0, 0, UIntPtr.Zero);                // key down
             keybd_event(VK_F15, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);  // key up
 
             uint tickAfterKeybd = GetLastInputTick();
 
-            // Method 2: SendInput with keyboard (modern API)
-            var kbInputs = new INPUT[2];
-            kbInputs[0].type = INPUT_KEYBOARD;
-            kbInputs[0].u.ki = new KEYBDINPUT { wVk = VK_SHIFT, dwFlags = 0 };
-            kbInputs[1].type = INPUT_KEYBOARD;
-            kbInputs[1].u.ki = new KEYBDINPUT { wVk = VK_SHIFT, dwFlags = KEYEVENTF_KEYUP };
-            uint kbResult = SendInput(2, kbInputs, Marshal.SizeOf<INPUT>());
-
-            uint tickAfterKbSend = GetLastInputTick();
-
-            // Method 3: SendInput with mouse movement
+            // Minimal mouse nudge
             var mouseInputs = new INPUT[2];
             mouseInputs[0].type = INPUT_MOUSE;
             mouseInputs[0].u.mi = new MOUSEINPUT { dx = 1, dy = 0, dwFlags = MOUSEEVENTF_MOVE };
@@ -351,11 +361,7 @@ public partial class ShutdownBlocker : IDisposable
 
             uint tickAfterMouse = GetLastInputTick();
 
-            // Method 4: Refresh execution state
-            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
-
             Log($"AntiIdle: before={tickBefore}, afterKeybd={tickAfterKeybd}, " +
-                $"afterKbSend={tickAfterKbSend}(ret={kbResult}), " +
                 $"afterMouse={tickAfterMouse}(ret={mouseResult}), " +
                 $"idle={(Environment.TickCount - tickAfterMouse)}ms");
         }

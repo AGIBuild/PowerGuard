@@ -13,6 +13,8 @@ internal sealed class AppConfig
 
     public bool RunAtStartupEnabled { get; set; }
 
+    public int AntiIdleActivationSeconds { get; set; } = 1200;
+
     public static string ConfigDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PowerGuard");
